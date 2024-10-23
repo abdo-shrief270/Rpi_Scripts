@@ -1,31 +1,45 @@
-# import opencv library
+from flask import Flask, Response
+from picamera2 import Picamera2
 import cv2
 
-# Create a VideoCapture() object as "video"
-video = cv2.VideoCapture(0)
+# Initialize the Flask application
+app = Flask(__name__)
 
-# Enter into an infinite while loop
-while True:
-    # Data of 1 frame is read every time when this while loop is repeated
-    # into the variable frame
-    # check contains the boolean value i.e True or False if its True then
-    # webcam is active
-    check,frame = video.read()
+# Initialize the camera
+picam2 = Picamera2()
+camera_config = picam2.create_video_configuration(main={"size": (640, 480)})
+picam2.configure(camera_config)
+picam2.start()
 
-    # imshow is a method of cv2 library which will basically show the image
-    # or frame on a new window
-    cv2.imshow("Video",frame)
 
-    # Creates a delay of 1 mili-second and stores the value to variable key
-    # if any key is pressed on keyboard
-    key = cv2.waitKey(1)
+def generate_frames():
+    """Generator function that captures frames from the camera and encodes them as JPEG."""
+    while True:
+        # Capture frame-by-frame
+        frame = picam2.capture_array()
 
-    # check if key is equal to 'q' if it is then break out of the loop
-    if(key == ord('q')):
-        break
+        # Convert the frame to JPEG
+        ret, buffer = cv2.imencode('.jpg', frame)
+        frame = buffer.tobytes()
 
-# Release the webcam. in other words turn it of
-video.release()
+        # Yield frame in byte format for streaming
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-# Destroys all the windows which were created
-cv2.destroyAllWindows()
+
+@app.route('/video_feed')
+def video_feed():
+    """Route to stream video from the camera."""
+    return Response(generate_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/')
+def index():
+    """Main page with video stream."""
+    return "<h1>Raspberry Pi Camera Stream</h1><img src='/video_feed'/>"
+
+
+if __name__ == '__main__':
+    # Run the Flask app
+    app.run(host='0.0.0.0', port=5000, threaded=True)
